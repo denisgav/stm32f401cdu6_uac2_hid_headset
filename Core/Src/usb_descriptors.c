@@ -131,7 +131,7 @@ uint8_t const* tud_hid_descriptor_report_cb(uint8_t itf) {
 #endif
 
 #if USB_HID_AUDIO_CTRL_ACTIVE == 1
-#define EPNUM_HID         0x81
+#define EPNUM_HID         0x83
 #endif // USB_HID_AUDIO_CTRL_ACTIVE
 
 uint8_t const desc_configuration[] = {
