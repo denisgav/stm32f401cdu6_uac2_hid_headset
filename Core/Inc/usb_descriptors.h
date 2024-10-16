@@ -34,6 +34,15 @@ enum {
 	REPORT_ID_COUNT
 };
 
+#define MY_TUD_HID_CONSUMER_SCAN_NEXT_CODE            0x1
+#define MY_TUD_HID_CONSUMER_SCAN_PREVIOUS_CODE        0x2
+#define MY_TUD_HID_CONSUMER_STOP_CODE                 0x4
+#define MY_TUD_HID_CONSUMER_PLAY_PAUSE_CODE           0x8
+#define MY_TUD_HID_CONSUMER_VOLUME_CODE               0x10
+#define MY_TUD_HID_CONSUMER_MUTE_CODE                 0x20
+#define MY_TUD_HID_CONSUMER_VOLUME_INCREMENT_CODE     0x40
+#define MY_TUD_HID_CONSUMER_VOLUME_DECREMENT_CODE     0x80
+
 // Consumer Control Report Descriptor Template
 #define MY_TUD_HID_REPORT_DESC_CONSUMER(...) \
 		 HID_USAGE_PAGE ( HID_USAGE_PAGE_CONSUMER ),        /* Usage Page (Consumer)                                                          */\
@@ -49,8 +58,8 @@ enum {
 		 HID_USAGE(HID_USAGE_CONSUMER_SCAN_NEXT            ),/*   Usage (Scan Next Track)                                                     */\
 		 HID_USAGE(HID_USAGE_CONSUMER_SCAN_PREVIOUS        ),/*   Usage (Scan Previous Track)                                                 */\
 		 HID_USAGE(HID_USAGE_CONSUMER_STOP                 ),/*   Usage (Stop)                                                                */\
-		 HID_USAGE(HID_USAGE_CONSUMER_VOLUME               ),/*   Usage (Eject)                                                               */\
 		 HID_USAGE(HID_USAGE_CONSUMER_PLAY_PAUSE           ),/*   Usage (Play/Pause)                                                          */\
+		 HID_USAGE(HID_USAGE_CONSUMER_VOLUME               ),/*   Usage (Eject)                                                               */\
 		 HID_USAGE(HID_USAGE_CONSUMER_MUTE                 ),/*   Usage (Mute)                                                                */\
 		 HID_USAGE(HID_USAGE_CONSUMER_VOLUME_INCREMENT     ),/*   Usage (Volume Increment)                                                    */\
 		 HID_USAGE(HID_USAGE_CONSUMER_VOLUME_DECREMENT     ),/*   Usage (Volume Decrement)                                                    */\

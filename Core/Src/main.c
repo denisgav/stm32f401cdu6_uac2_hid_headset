@@ -35,6 +35,10 @@
 
 #include "ssd1306.h"
 #include "ssd1306_fonts.h"
+
+#if USB_HID_AUDIO_CTRL_ACTIVE == 1
+#include "usb_hid_status.h"
+#endif //USB_HID_AUDIO_CTRL_ACTIVE
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -60,6 +64,8 @@ I2S_HandleTypeDef hi2s3;
 DMA_HandleTypeDef hdma_spi2_tx;
 DMA_HandleTypeDef hdma_spi3_rx;
 
+TIM_HandleTypeDef htim3;
+
 PCD_HandleTypeDef hpcd_USB_OTG_FS;
 
 /* USER CODE BEGIN PV */
@@ -84,6 +90,11 @@ uint16_t mic_usb_16b_buffer[SAMPLE_BUFFER_SIZE];
 uint8_t mic_usb_read_buf[SAMPLE_BUFFER_SIZE * 2 * 4 * 2]; // Max size of audio sample is  2 * 4. 2 Channels, 4 byte width sample
 uint32_t mic_i2s_buf[SAMPLE_BUFFER_SIZE * 2];
 i2s_32b_audio_sample mic_i2s_read_buffer[SAMPLE_BUFFER_SIZE];
+
+#if USB_HID_AUDIO_CTRL_ACTIVE == 1
+usb_hid_status_t hid_status;
+void usb_hid_task(void);
+#endif //USB_HID_AUDIO_CTRL_ACTIVE
 
 void led_blinking_task(void);
 
@@ -139,6 +150,7 @@ static void MX_USB_OTG_FS_PCD_Init(void);
 static void MX_I2S2_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_I2S3_Init(void);
+static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -185,6 +197,7 @@ int main(void)
   MX_I2S2_Init();
   MX_I2C1_Init();
   MX_I2S3_Init();
+  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
 
 	current_settings.spk_sample_rate = I2S_SPK_RATE_DEF;
@@ -232,6 +245,11 @@ int main(void)
 	// Init SSD
 	ssd1306_Init();
 
+#if USB_HID_AUDIO_CTRL_ACTIVE == 1
+	memset(&hid_status, 0x0, sizeof(hid_status));
+	HAL_TIM_Encoder_Start_IT(&htim3, TIM_CHANNEL_ALL);
+#endif //USB_HID_AUDIO_CTRL_ACTIVE
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -240,6 +258,10 @@ int main(void)
 		usb_headset_task(); // TinyUSB device task
 		led_blinking_task();
 		status_update_task();
+#if USB_HID_AUDIO_CTRL_ACTIVE == 1
+		usb_hid_task();
+#endif //USB_HID_AUDIO_CTRL_ACTIVE
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -414,6 +436,55 @@ static void MX_I2S3_Init(void)
 }
 
 /**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_Encoder_InitTypeDef sConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 0;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 65535;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  sConfig.EncoderMode = TIM_ENCODERMODE_TI12;
+  sConfig.IC1Polarity = TIM_ICPOLARITY_RISING;
+  sConfig.IC1Selection = TIM_ICSELECTION_DIRECTTI;
+  sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
+  sConfig.IC1Filter = 0;
+  sConfig.IC2Polarity = TIM_ICPOLARITY_RISING;
+  sConfig.IC2Selection = TIM_ICSELECTION_DIRECTTI;
+  sConfig.IC2Prescaler = TIM_ICPSC_DIV1;
+  sConfig.IC2Filter = 0;
+  if (HAL_TIM_Encoder_Init(&htim3, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+  /* USER CODE END TIM3_Init 2 */
+
+}
+
+/**
   * @brief USB_OTG_FS Initialization Function
   * @param None
   * @retval None
@@ -496,6 +567,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(ONBOARD_LED_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : USR_SPK_MUTE_BTN_Pin */
+  GPIO_InitStruct.Pin = USR_SPK_MUTE_BTN_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(USR_SPK_MUTE_BTN_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : USR_MIC_MUTE_BTN_Pin */
   GPIO_InitStruct.Pin = USR_MIC_MUTE_BTN_Pin;
@@ -721,11 +798,12 @@ void usb_headset_tud_audio_tx_done_post_load_handler(uint8_t rhport,
 
 			for (uint32_t i = 0; i < num_of_frames_read; i++) {
 				if (current_settings.mic_resolution == 24) {
-					if(current_settings.usr_mic_mute == false){
+					if (current_settings.usr_mic_mute == false) {
 						int32_t left_24b = (int32_t) mic_i2s_read_buffer[i].left
 								<< MIC_FORMAT_24B_TO_24B_SHIFT_VAL; // Magic number
-						int32_t right_24b = (int32_t) mic_i2s_read_buffer[i].right
-								<< MIC_FORMAT_24B_TO_24B_SHIFT_VAL; // Magic number
+						int32_t right_24b =
+								(int32_t) mic_i2s_read_buffer[i].right
+										<< MIC_FORMAT_24B_TO_24B_SHIFT_VAL; // Magic number
 
 						mic_usb_24b_buffer[i * 2] = left_24b; // TODO: check this value
 						mic_usb_24b_buffer[i * 2 + 1] = right_24b; // TODO: check this value
@@ -734,11 +812,12 @@ void usb_headset_tud_audio_tx_done_post_load_handler(uint8_t rhport,
 						mic_usb_24b_buffer[i * 2 + 1] = 0x0;
 					}
 				} else {
-					if(current_settings.usr_mic_mute == false){
+					if (current_settings.usr_mic_mute == false) {
 						int32_t left_16b = (int32_t) mic_i2s_read_buffer[i].left
 								>> MIC_FORMAT_24B_TO_16B_SHIFT_VAL; // Magic number
-						int32_t right_16b = (int32_t) mic_i2s_read_buffer[i].right
-								>> MIC_FORMAT_24B_TO_16B_SHIFT_VAL; // Magic number
+						int32_t right_16b =
+								(int32_t) mic_i2s_read_buffer[i].right
+										>> MIC_FORMAT_24B_TO_16B_SHIFT_VAL; // Magic number
 
 						mic_usb_16b_buffer[i * 2] = left_16b; // TODO: check this value
 						mic_usb_16b_buffer[i * 2 + 1] = right_16b; // TODO: check this value
@@ -753,7 +832,7 @@ void usb_headset_tud_audio_tx_done_post_load_handler(uint8_t rhport,
 		if (num_of_frames_read >= current_settings.samples_in_i2s_frame_min) {
 			for (uint32_t i = 0; i < num_of_frames_read; i++) {
 				if (current_settings.mic_resolution == 24) {
-					if(current_settings.usr_mic_mute == false){
+					if (current_settings.usr_mic_mute == false) {
 						int32_t mono_24b = (int32_t) mic_i2s_read_buffer[i].left
 								<< MIC_FORMAT_24B_TO_24B_SHIFT_VAL; // Magic number
 
@@ -762,7 +841,7 @@ void usb_headset_tud_audio_tx_done_post_load_handler(uint8_t rhport,
 						mic_usb_24b_buffer[i] = 0x0; // TODO: check this value
 					}
 				} else {
-					if(current_settings.usr_mic_mute == false){
+					if (current_settings.usr_mic_mute == false) {
 						int32_t mono_24b = (int32_t) mic_i2s_read_buffer[i].left
 								>> MIC_FORMAT_24B_TO_16B_SHIFT_VAL; // Magic number
 
@@ -875,14 +954,12 @@ void HAL_I2S_RxCpltCallback(I2S_HandleTypeDef *hi2s) {
 			current_settings.samples_in_i2s_frame_max);
 }
 
-
 /**
-  * @brief  EXTI line detection callbacks.
-  * @param  GPIO_Pin Specifies the pins connected EXTI line
-  * @retval None
-  */
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
-{
+ * @brief  EXTI line detection callbacks.
+ * @param  GPIO_Pin Specifies the pins connected EXTI line
+ * @retval None
+ */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 	static uint32_t prev_btb_press__ms = 0;
 
 	uint32_t cur_time_ms = board_millis();
@@ -892,9 +969,16 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
 	prev_btb_press__ms = cur_time_ms;
 
-	if(GPIO_Pin == USR_MIC_MUTE_BTN_Pin){
+	if (GPIO_Pin == USR_MIC_MUTE_BTN_Pin) {
 		current_settings.usr_mic_mute = !current_settings.usr_mic_mute;
 	}
+
+#if USB_HID_AUDIO_CTRL_ACTIVE == 1
+	if (GPIO_Pin == USR_SPK_MUTE_BTN_Pin) {
+		hid_status.cur_custom_ctrl_scan_code = MY_TUD_HID_CONSUMER_MUTE_CODE;
+		hid_status.custom_ctrl_scan_code_updated = true;
+	}
+#endif //USB_HID_AUDIO_CTRL_ACTIVE
 }
 
 //void HAL_I2S_ErrorCallback(I2S_HandleTypeDef *hi2s){
@@ -940,7 +1024,8 @@ void status_update_task(void) {
 
 	uint32_t cur_time_ms = board_millis();
 
-	HAL_GPIO_WritePin(LED_MIC_MUTE_GPIO_Port, LED_MIC_MUTE_Pin, current_settings.usr_mic_mute ? GPIO_PIN_SET : GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(LED_MIC_MUTE_GPIO_Port, LED_MIC_MUTE_Pin,
+			current_settings.usr_mic_mute ? GPIO_PIN_SET : GPIO_PIN_RESET);
 
 	// Update status once per second
 	if (cur_time_ms - prev_status_update__ms < 1000)
@@ -1090,23 +1175,23 @@ void display_ssd1306_info(void) {
 // Invoked when received GET_REPORT control request
 // Application must fill buffer report's content and return its length.
 // Return zero will cause the stack to STALL request
-uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t* buffer, uint16_t reqlen)
-{
-  // TODO not Implemented
-  (void) instance;
-  (void) report_id;
-  (void) report_type;
-  (void) buffer;
-  (void) reqlen;
+uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id,
+		hid_report_type_t report_type, uint8_t *buffer, uint16_t reqlen) {
+	// TODO not Implemented
+	(void) instance;
+	(void) report_id;
+	(void) report_type;
+	(void) buffer;
+	(void) reqlen;
 
-  return 0;
+	return 0;
 }
 
 // Invoked when received SET_REPORT control request or
 // received data on OUT endpoint ( Report ID = 0, Type = 0 )
-void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t const* buffer, uint16_t bufsize)
-{
-  (void) instance;
+void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id,
+		hid_report_type_t report_type, uint8_t const *buffer, uint16_t bufsize) {
+	(void) instance;
 
 //  if (report_type == HID_REPORT_TYPE_OUTPUT)
 //  {
@@ -1132,6 +1217,51 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_
 //    }
 //  }
 }
+//usb_hid_status_t hid_status;
+void usb_hid_task(void) {
+	static uint32_t prev_hid_tasc_call__ms = 0;
+	static bool prev_media_report_is_not_empty = false;
+
+	uint32_t cur_time_ms = board_millis();
+
+	// Update status once per second
+	if (cur_time_ms - prev_hid_tasc_call__ms < 50)
+		return;
+
+	int16_t volume_rotary_encoder_cntr = __HAL_TIM_GET_COUNTER(&htim3);
+	if(volume_rotary_encoder_cntr != hid_status.volume_rotary_encoder_cntr_prev){
+		hid_status.cur_custom_ctrl_scan_code = (volume_rotary_encoder_cntr > hid_status.volume_rotary_encoder_cntr_prev) ?
+				MY_TUD_HID_CONSUMER_VOLUME_INCREMENT_CODE : MY_TUD_HID_CONSUMER_VOLUME_DECREMENT_CODE;
+
+		hid_status.custom_ctrl_scan_code_updated = true;
+
+		hid_status.volume_rotary_encoder_cntr_prev = volume_rotary_encoder_cntr;
+	}
+
+	// Remote wakeup
+	if (tud_suspended() && (hid_status.cur_custom_ctrl_scan_code != 0x0) && (hid_status.custom_ctrl_scan_code_updated == true)) {
+		// Wake up host if we are in suspend mode
+		// and REMOTE_WAKEUP feature is enabled by host
+		tud_remote_wakeup();
+	} else {
+		if ( !tud_hid_ready() ) return;
+
+		if(hid_status.custom_ctrl_scan_code_updated == true){
+			tud_hid_report(REPORT_ID_CONSUMER_CONTROL, &(hid_status.cur_custom_ctrl_scan_code), sizeof(hid_status.cur_custom_ctrl_scan_code));
+
+			hid_status.cur_custom_ctrl_scan_code = 0x0;
+			hid_status.custom_ctrl_scan_code_updated = false;
+			prev_media_report_is_not_empty = true;
+		} else {
+			if(prev_media_report_is_not_empty){
+				uint8_t empty_scan_code = 0x0;
+				tud_hid_report(REPORT_ID_CONSUMER_CONTROL, &(empty_scan_code), sizeof(empty_scan_code));
+				prev_media_report_is_not_empty = false;
+			}
+		}
+	}
+}
+
 //-----------------------------------------------------------------
 //-----------------------------------------------------------------
 #endif // USB_HID_AUDIO_CTRL_ACTIVE
