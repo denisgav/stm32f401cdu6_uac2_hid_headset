@@ -12,6 +12,9 @@ typedef struct _usb_hid_status_t {
 	uint8_t cur_custom_ctrl_scan_code;
 	int16_t volume_rotary_encoder_cntr_prev;
 
+	GPIO_PinState btn_scan_prev_status;
+	GPIO_PinState btn_scan_next_status;
+
 	bool custom_ctrl_scan_code_updated;
 } usb_hid_status_t;
 

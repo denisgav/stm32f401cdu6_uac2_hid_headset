@@ -568,11 +568,23 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(ONBOARD_LED_GPIO_Port, &GPIO_InitStruct);
 
+  /*Configure GPIO pins : USR_SCAN_PREV_BTN_Pin USR_SCAN_NEXT_BTN_Pin */
+  GPIO_InitStruct.Pin = USR_SCAN_PREV_BTN_Pin|USR_SCAN_NEXT_BTN_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
   /*Configure GPIO pin : USR_SPK_MUTE_BTN_Pin */
   GPIO_InitStruct.Pin = USR_SPK_MUTE_BTN_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(USR_SPK_MUTE_BTN_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : USR_PLAY_PAUSE_BTN_Pin */
+  GPIO_InitStruct.Pin = USR_PLAY_PAUSE_BTN_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(USR_PLAY_PAUSE_BTN_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : USR_MIC_MUTE_BTN_Pin */
   GPIO_InitStruct.Pin = USR_MIC_MUTE_BTN_Pin;
@@ -978,6 +990,11 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 		hid_status.cur_custom_ctrl_scan_code = MY_TUD_HID_CONSUMER_MUTE_CODE;
 		hid_status.custom_ctrl_scan_code_updated = true;
 	}
+
+	if (GPIO_Pin == USR_PLAY_PAUSE_BTN_Pin) {
+		hid_status.cur_custom_ctrl_scan_code = MY_TUD_HID_CONSUMER_PLAY_PAUSE_CODE;
+		hid_status.custom_ctrl_scan_code_updated = true;
+	}
 #endif //USB_HID_AUDIO_CTRL_ACTIVE
 }
 
@@ -1228,6 +1245,9 @@ void usb_hid_task(void) {
 	if (cur_time_ms - prev_hid_tasc_call__ms < 50)
 		return;
 
+	//--------------
+	// Checking rotary encoder
+	//--------------
 	int16_t volume_rotary_encoder_cntr = __HAL_TIM_GET_COUNTER(&htim3);
 	if(volume_rotary_encoder_cntr != hid_status.volume_rotary_encoder_cntr_prev){
 		hid_status.cur_custom_ctrl_scan_code = (volume_rotary_encoder_cntr > hid_status.volume_rotary_encoder_cntr_prev) ?
@@ -1237,6 +1257,26 @@ void usb_hid_task(void) {
 
 		hid_status.volume_rotary_encoder_cntr_prev = volume_rotary_encoder_cntr;
 	}
+	//--------------
+
+	//--------------
+	// Checking scan prev/next buttons
+	//--------------
+	GPIO_PinState scan_next_pin_state = HAL_GPIO_ReadPin(USR_SCAN_NEXT_BTN_GPIO_Port, USR_SCAN_NEXT_BTN_Pin);
+	GPIO_PinState scan_prev_pin_state = HAL_GPIO_ReadPin(USR_SCAN_PREV_BTN_GPIO_Port, USR_SCAN_PREV_BTN_Pin);
+
+	if((scan_prev_pin_state == GPIO_PIN_SET) && (hid_status.btn_scan_prev_status == GPIO_PIN_RESET)){
+		hid_status.custom_ctrl_scan_code_updated = true;
+		hid_status.cur_custom_ctrl_scan_code = MY_TUD_HID_CONSUMER_SCAN_PREVIOUS_CODE;
+	}
+	hid_status.btn_scan_next_status = scan_prev_pin_state;
+
+	if((scan_next_pin_state == GPIO_PIN_SET) && (hid_status.btn_scan_next_status == GPIO_PIN_RESET)){
+		hid_status.custom_ctrl_scan_code_updated = true;
+		hid_status.cur_custom_ctrl_scan_code = MY_TUD_HID_CONSUMER_SCAN_NEXT_CODE;
+	}
+	hid_status.btn_scan_next_status = scan_next_pin_state;
+	//--------------
 
 	// Remote wakeup
 	if (tud_suspended() && (hid_status.cur_custom_ctrl_scan_code != 0x0) && (hid_status.custom_ctrl_scan_code_updated == true)) {
